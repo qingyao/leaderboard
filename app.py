@@ -232,6 +232,7 @@ HTML = """
         <a href="https://docs.google.com/document/d/1mr3Gtoizlf2rpxz_tFaiZzyI7oSHGOQOY_obTiULrgg/edit?usp=sharing" target="_blank" rel="noopener noreferrer">Guideline and tips</a>
         <a href="https://docs.google.com/spreadsheets/d/10NuOfhl-iueRPImkrWnIAhcJ3drBa00A8-DTUd0q2So/edit?usp=sharing" target="_blank" rel="noopener noreferrer">Current usage</a>
         <a href="https://docs.google.com/spreadsheets/d/1W9oHgotx9LIF_r-roZJfcK00D1f3-IXTtV1zNIywH5I/edit?usp=sharing" target="_blank" rel="noopener noreferrer">Tape storage</a>
+        <a href="https://docs.google.com/spreadsheets/d/1G1M5u6J2VZJaH2sTVQhNZQ9g1cEgj77cc8wl0GkhJqI/edit?usp=sharing" target="_blank" rel="noopener noreferrer">Archival queue</a>
     </div>
 
     <script>
