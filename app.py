@@ -5,22 +5,22 @@ import os
 
 app = Flask(__name__)
 
-# In-memory storage - now stores {name: {score: int, timestamp: str}}
-scores = {}
+# In-memory storage - now stores {name: {cleaned_gb: float, timestamp: str, location: str, starting_gb: float}}
+data = {}
 
-# Load scores from file on startup
-def load_scores():
-    global scores
-    filepath = '/Users/qingyao/vonMering/leaderboard/scores_export.json'
+# Load data from file on startup
+def load_data():
+    global data
+    filepath = './data_export.json'
     if os.path.exists(filepath):
         try:
             with open(filepath, 'r') as f:
-                scores = json.load(f)
-            print(f"Loaded {len(scores)} scores from {filepath}")
+                data = json.load(f)
+            print(f"Loaded {len(data)} entries from {filepath}")
         except Exception as e:
-            print(f"Error loading scores: {e}")
+            print(f"Error loading data: {e}")
 
-load_scores()
+load_data()
 
 # HTML template
 HTML = """
@@ -181,6 +181,30 @@ HTML = """
             margin-right: 15px;
             min-width: 40px;
         }
+
+        .references {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            display: flex;
+            gap: 12px;
+            font-size: 13px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px 12px;
+            border-radius: 999px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            backdrop-filter: blur(6px);
+        }
+
+        .references a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .references a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -190,8 +214,12 @@ HTML = """
         <h3>Submit Your Result</h3>
         <div class="input-group">
             <input id="name" placeholder="Enter your name" onkeypress="handleKeyPress(event)" />
-            <input id="score" placeholder="cleaned GB" type="number" onkeypress="handleKeyPress(event)" />
-            <button onclick="submitScore()">Submit</button>
+            <input id="location" placeholder="Location" onkeypress="handleKeyPress(event)" />
+        </div>
+        <div class="input-group">
+            <input id="starting" placeholder="Starting GB" type="number" step="0.001" onkeypress="handleKeyPress(event)" />
+            <input id="cleaned" placeholder="Cleaned GB" type="number" step="0.001" onkeypress="handleKeyPress(event)" />
+            <button onclick="submitData()">Submit</button>
         </div>
 
         <div class="leaderboard">
@@ -200,26 +228,34 @@ HTML = """
         </div>
     </div>
 
+    <div class="references">
+        <a href="https://docs.google.com/document/d/1mr3Gtoizlf2rpxz_tFaiZzyI7oSHGOQOY_obTiULrgg/edit?usp=sharing" target="_blank" rel="noopener noreferrer">Guideline and tips</a>
+        <a href="https://docs.google.com/spreadsheets/d/10NuOfhl-iueRPImkrWnIAhcJ3drBa00A8-DTUd0q2So/edit?usp=sharing" target="_blank" rel="noopener noreferrer">Current usage</a>
+        <a href="https://docs.google.com/spreadsheets/d/1W9oHgotx9LIF_r-roZJfcK00D1f3-IXTtV1zNIywH5I/edit?usp=sharing" target="_blank" rel="noopener noreferrer">Tape storage</a>
+    </div>
+
     <script>
-        async function loadScores() {
-            const res = await fetch('/scores');
-            const data = await res.json();
+        async function loadData() {
+            const res = await fetch('/data');
+            const entries = await res.json();
             const board = document.getElementById('leaderboard');
 
             board.innerHTML = '';
-            data.forEach((row, index) => {
+            entries.forEach((row, index) => {
                 const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(row.name)}&background=667eea&color=fff&size=128&rounded=true`;
                 const timeAgo = new Date(row.timestamp);
                 const timeStr = timeAgo.toLocaleString();
+                const percentage = row.starting_gb > 0 ? ((row.cleaned_gb / row.starting_gb) * 100).toFixed(1) : 0;
                 board.innerHTML += `
                     <div class="score-item">
                         <div class="rank">#${index + 1}</div>
                         <img src="${avatarUrl}" alt="${row.name}" class="avatar" />
                         <div class="score-info">
-                            <div class="score-name">${row.name}</div>
+                            <div class="score-name">${row.name} ${row.location ? '(' + row.location + ')' : ''}</div>
                             <div class="score-time">${timeStr}</div>
+                            <div class="score-time">Started: ${row.starting_gb} GB → Cleaned: ${row.cleaned_gb} GB (${percentage}%)</div>
                         </div>
-                        <div class="score-value">${row.score} GB</div>
+                        <div class="score-value">${percentage}%</div>
                     </div>
                 `;
             });
@@ -231,39 +267,43 @@ HTML = """
             }
         }
 
-        async function submitScore() {
+        async function submitData() {
             const name = document.getElementById('name').value.trim();
-            const score = document.getElementById('score').value.trim();
+            const location = document.getElementById('location').value.trim();
+            const starting = document.getElementById('starting').value.trim();
+            const cleaned = document.getElementById('cleaned').value.trim();
 
-            if (!name || !score) {
-                alert('Please enter both name and score');
+            if (!name || !starting || !cleaned) {
+                alert('Please enter name, starting GB, and cleaned GB');
                 return;
             }
 
             await fetch('/submit', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, score })
+                body: JSON.stringify({ name, location, starting_gb: starting, cleaned_gb: cleaned })
             });
             
             document.getElementById('name').value = '';
-            document.getElementById('score').value = '';
-            loadScores();
+            document.getElementById('location').value = '';
+            document.getElementById('starting').value = '';
+            document.getElementById('cleaned').value = '';
+            loadData();
         }
 
         // Auto-save to server every 2 seconds
         setInterval(async () => {
-            const res = await fetch('/scores');
-            const data = await res.json();
+            const res = await fetch('/data');
+            const entries = await res.json();
             await fetch('/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
+                body: JSON.stringify(entries)
             });
         }, 2000);
         
-        loadScores();
-        setInterval(loadScores, 2000);
+        loadData();
+        setInterval(loadData, 2000);
     </script>
 </div>
 </body>
@@ -276,62 +316,65 @@ def index():
 
 @app.route('/submit', methods=['POST'])
 def submit():
-    data = request.json
-    name = data["name"]
-    score = round(float(data["score"]),3)
+    request_data = request.json
+    name = request_data["name"]
+    cleaned_gb = round(float(request_data["cleaned_gb"]),3)
+    location = request_data.get("location", "")
+    starting_gb = round(float(request_data.get("starting_gb", 0)),3)
     
-    scores[name] = {
-        "score": score,
-        "timestamp": datetime.now().isoformat()
+    data[name] = {
+        "cleaned_gb": cleaned_gb,
+        "timestamp": datetime.now().isoformat(),
+        "location": location,
+        "starting_gb": starting_gb
     }
     return jsonify({"status": "ok"})
 
 @app.route('/export', methods=['GET'])
 def export():
-    return scores
+    return data
 
 @app.route('/save', methods=['POST'])
 def save():
-    data = request.json
-    save_data = {item['name']: {'score': item['score'], 'timestamp': item['timestamp']} for item in data}
-    filepath = '/Users/qingyao/vonMering/leaderboard/scores_export.json'
+    request_data = request.json
+    save_data = {item['name']: {'cleaned_gb': item['cleaned_gb'], 'timestamp': item['timestamp'], 'location': item.get('location', ''), 'starting_gb': item.get('starting_gb', 0)} for item in request_data}
+    filepath = './data_export.json'
     with open(filepath, 'w') as f:
         json.dump(save_data, f, indent=2)
-    print(f"Scores saved to {filepath}")
+    print(f"Data saved to {filepath}")
     return jsonify({"status": "saved"})
 
 @app.route('/edit', methods=['GET','POST'])
 def edit():
     # Support both JSON body and query parameters
     try:
-        data = request.json
+        request_data = request.json
     except:
-        data = request.args
+        request_data = request.args
     
-    action = data.get("action")
-    name = data.get("name")
-    score = data.get("score")
+    action = request_data.get("action")
+    name = request_data.get("name")
+    cleaned_gb = request_data.get("cleaned_gb")
     
-    if not all([action, name, score]):
+    if not all([action, name, cleaned_gb]):
         return jsonify({"error": "Missing required parameters"}), 400
     
-    score = int(score)
+    cleaned_gb = int(cleaned_gb)
     
     if action == "add":
-        scores[name] = score
-    elif action == "remove" and name in scores:
-        del scores[name]
-    elif action == "update" and name in scores:
-        scores[name] = score    
-    return scores
+        data[name] = cleaned_gb
+    elif action == "remove" and name in data:
+        del data[name]
+    elif action == "update" and name in data:
+        data[name] = cleaned_gb    
+    return data
 
-@app.route('/scores')
-def get_scores():
-    # sorted highest score first
-    score_transform = [{'name': name, 'score': data['score'], 'timestamp': data['timestamp']} 
-                      for name, data in scores.items()]
-    sorted_scores = sorted(score_transform, key=lambda x: x['score'], reverse=True)
-    return jsonify(sorted_scores)
+@app.route('/data')
+def get_data():
+    # sorted highest cleaned_gb first
+    entries = [{'name': name, 'cleaned_gb': entry['cleaned_gb'], 'timestamp': entry['timestamp'], 'location': entry.get('location', ''), 'starting_gb': entry.get('starting_gb', 0)} for name, entry in data.items()]
+    sorted_entries = sorted(entries, key=lambda x: x['cleaned_gb'], reverse=True)
+    return jsonify(sorted_entries)
 
 if __name__ == '__main__':
     # run on local network
