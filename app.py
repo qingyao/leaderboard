@@ -2,25 +2,37 @@ from flask import Flask, request, jsonify, render_template_string
 import json
 from datetime import datetime
 import os
+import fcntl
 
 app = Flask(__name__)
 
-# In-memory storage - now stores {name: {cleaned_gb: float, timestamp: str, location: str, starting_gb: float}}
-data = {}
+DATA_FILE = './data_export.json'
 
-# Load data from file on startup
+# Read data from file (thread-safe)
 def load_data():
-    global data
-    filepath = './data_export.json'
-    if os.path.exists(filepath):
-        try:
-            with open(filepath, 'r') as f:
-                data = json.load(f)
-            print(f"Loaded {len(data)} entries from {filepath}")
-        except Exception as e:
-            print(f"Error loading data: {e}")
+    if not os.path.exists(DATA_FILE):
+        return {}
+    try:
+        with open(DATA_FILE, 'r') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)  # Shared lock for reading
+            data = json.load(f)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        return data
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        return {}
 
-load_data()
+# Save data to file (thread-safe)
+def save_data(data):
+    try:
+        with open(DATA_FILE, 'w') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock for writing
+            json.dump(data, f, indent=2)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        return True
+    except Exception as e:
+        print(f"Error saving data: {e}")
+        return False
 
 # HTML template
 HTML = """
@@ -292,17 +304,6 @@ HTML = """
             loadData();
         }
 
-        // Auto-save to server every 2 seconds
-        setInterval(async () => {
-            const res = await fetch('/data');
-            const entries = await res.json();
-            await fetch('/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(entries)
-            });
-        }, 2000);
-        
         loadData();
         setInterval(loadData, 2000);
     </script>
@@ -323,27 +324,28 @@ def submit():
     location = request_data.get("location", "")
     starting_gb = round(float(request_data.get("starting_gb", 0)),3)
     
+    # Read current data, update, and save atomically
+    data = load_data()
     data[name] = {
         "cleaned_gb": cleaned_gb,
         "timestamp": datetime.now().isoformat(),
         "location": location,
         "starting_gb": starting_gb
     }
+    save_data(data)
     return jsonify({"status": "ok"})
 
 @app.route('/export', methods=['GET'])
 def export():
-    return data
+    return load_data()
 
 @app.route('/save', methods=['POST'])
 def save():
     request_data = request.json
-    save_data = {item['name']: {'cleaned_gb': item['cleaned_gb'], 'timestamp': item['timestamp'], 'location': item.get('location', ''), 'starting_gb': item.get('starting_gb', 0)} for item in request_data}
-    filepath = './data_export.json'
-    with open(filepath, 'w') as f:
-        json.dump(save_data, f, indent=2)
-    print(f"Data saved to {filepath}")
-    return jsonify({"status": "saved"})
+    data_to_save = {item['name']: {'cleaned_gb': item['cleaned_gb'], 'timestamp': item['timestamp'], 'location': item.get('location', ''), 'starting_gb': item.get('starting_gb', 0)} for item in request_data}
+    if save_data(data_to_save):
+        return jsonify({"status": "saved"})
+    return jsonify({"status": "error"}), 500
 
 @app.route('/edit', methods=['GET','POST'])
 def edit():
@@ -362,17 +364,21 @@ def edit():
     
     cleaned_gb = int(cleaned_gb)
     
+    # Read current data, modify, and save back
+    data = load_data()
     if action == "add":
         data[name] = cleaned_gb
     elif action == "remove" and name in data:
         del data[name]
     elif action == "update" and name in data:
-        data[name] = cleaned_gb    
+        data[name] = cleaned_gb
+    save_data(data)
     return data
 
 @app.route('/data')
 def get_data():
-    # sorted highest cleaned_gb first
+    # Read from disk and sort by highest cleaned_gb first
+    data = load_data()
     entries = [{'name': name, 'cleaned_gb': entry['cleaned_gb'], 'timestamp': entry['timestamp'], 'location': entry.get('location', ''), 'starting_gb': entry.get('starting_gb', 0)} for name, entry in data.items()]
     sorted_entries = sorted(entries, key=lambda x: x['cleaned_gb'], reverse=True)
     return jsonify(sorted_entries)
